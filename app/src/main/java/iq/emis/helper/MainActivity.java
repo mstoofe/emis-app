@@ -4,7 +4,15 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.graphics.Color;
+import android.view.Gravity;
+import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.widget.FrameLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -21,6 +29,8 @@ public class MainActivity extends Activity {
     private static final String HOME = "https://emis.moedu.gov.iq/auth/login";
     private static final int FILE_REQ = 1;
     private WebView web;
+    private TextView loading;
+    private ProgressBar bar;
     private ValueCallback<Uri[]> fileCb;
     private String helperJs = "";
 
@@ -29,8 +39,20 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         helperJs = readAsset("emis_fill.js");
 
+        FrameLayout root = new FrameLayout(this);
         web = new WebView(this);
-        setContentView(web);
+        root.addView(web, new FrameLayout.LayoutParams(-1, -1));
+        loading = new TextView(this);
+        loading.setText("جاري فتح منصة EMIS...\nقد يستغرق ذلك بضع ثوانٍ");
+        loading.setTextSize(18);
+        loading.setGravity(Gravity.CENTER);
+        loading.setBackgroundColor(Color.WHITE);
+        loading.setTextColor(Color.parseColor("#1565c0"));
+        root.addView(loading, new FrameLayout.LayoutParams(-1, -1));
+        bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(100);
+        root.addView(bar, new FrameLayout.LayoutParams(-1, 12, Gravity.TOP));
+        setContentView(root);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -43,9 +65,7 @@ public class MainActivity extends Activity {
         s.setSupportMultipleWindows(false);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-        // نفس هوية متصفح Chrome العادي (بدون علامة WebView) حتى يقبل التحقق الأمني
-        String ua = s.getUserAgentString().replace("; wv)", ")").replaceAll("Version/\\d+(\\.\\d+)* ", "");
-        s.setUserAgentString(ua);
+
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -53,7 +73,17 @@ public class MainActivity extends Activity {
 
         web.setWebViewClient(new WebViewClient() {
             @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
+                if (req.isForMainFrame()) {
+                    loading.setText("تعذر الاتصال بالمنصة.\nتأكد من الإنترنت ثم اضغط هنا لإعادة المحاولة");
+                    loading.setVisibility(View.VISIBLE);
+                    loading.setOnClickListener(x -> { loading.setText("جاري فتح منصة EMIS..."); web.reload(); });
+                }
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
+                loading.setVisibility(View.GONE);
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
                 if (url != null && url.startsWith("https://emis.moedu.gov.iq")) {
@@ -67,6 +97,13 @@ public class MainActivity extends Activity {
         });
 
         web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onProgressChanged(WebView v, int p) {
+                bar.setProgress(p);
+                bar.setVisibility(p >= 100 ? View.GONE : View.VISIBLE);
+                if (p >= 60) loading.setVisibility(View.GONE);
+            }
+
             @Override
             public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
                 if (fileCb != null) fileCb.onReceiveValue(null);
