@@ -1,5 +1,5 @@
 (function () {
-  var VER = 14;
+  var VER = 15;
   if (window.__emisPanel && window.__emisVer === VER && document.body.contains(window.__emisPanel)) { window.__emisPanel.style.display = 'block'; return; }
   if (window.__emisPanel) { if (window.__emisStop) window.__emisStop(); window.__emisPanel.remove(); }
   if (window.__emisKeys) document.removeEventListener('keydown', window.__emisKeys, true);
@@ -322,9 +322,20 @@
     return await waitFor(nameEmpty, 45000);
   }
 
+  var SAVED = {}; try { SAVED = JSON.parse(localStorage.getItem(KEY + '_saved')) || {}; } catch (e) {}
+  function saveSaved() { try { localStorage.setItem(KEY + '_saved', JSON.stringify(SAVED)); } catch (e) {} }
+  function rowKey(i) {
+    var r = D.rows[i] || [], parts = [];
+    ['الإسم', 'إسم الأب', 'اسم والد الأب', 'اللقب', 'إسم الأم', 'تاريخ التولّد'].forEach(function (h) {
+      var c = -1; for (var k = 0; k < D.h.length; k++) if (norm(D.h[k]) === norm(h)) { c = k; break; }
+      parts.push(c >= 0 ? norm(r[c] || '') : '');
+    });
+    return parts.join('|');
+  }
   async function confirmDialog() {
     var d = vis('.q-dialog .q-card');
     if (!d.length) return false;
+    if (/موجود|مكرر|مسبق|تكرار|سابق/.test(d[d.length - 1].textContent)) return 'dup';
     var bs = d[d.length - 1].querySelectorAll('button');
     for (var i = 0; i < bs.length; i++) if (/نعم|تأكيد|موافق|حفظ|متابعة/.test(bs[i].textContent)) { bs[i].click(); return true; }
     return false;
@@ -352,31 +363,36 @@
     if (b.failed.length) return failMsg(who, b.failed);
     if (fieldErrors().length) return who + ': حقول ناقصة أو خاطئة ← ' + fieldErrors().join('، ');
     var sv = iconBtn('fa-floppy-disk'); if (!sv) return who + ': لم أجد زر الحفظ';
-    var before = location.pathname;
+    var before = location.pathname, nameEl = document.getElementById('base-input-الإسم');
+    var seenPos = vis('.q-notification.bg-positive').length;
+    function savedSignal() {
+      if (location.pathname !== before) return 'ok';
+      if (vis('.q-notification.bg-positive').length > seenPos) return 'ok';
+      if (!iconBtn('fa-floppy-disk') && !findField('الصف الدراسي')) return 'ok';
+      if (nameEl && !document.body.contains(nameEl) && !findField('الصف الدراسي')) return 'ok';
+      return null;
+    }
     var manual = !autoSave.checked;
     if (manual) {
       say('✋ ' + who + ' جاهز. راجع البيانات واضغط زر الحفظ في المنصة.\nبعد نجاح الحفظ سأفتح الطالب التالي وحدي.', '#1565c0');
-      var seen = vis('.q-notification.bg-positive').length;
-      var okm = await waitFor(function () {
-        if (location.pathname !== before) return 'ok';
-        if (vis('.q-notification.bg-positive').length > seen) return 'ok';
-        return null;
-      }, 3600000);
+      var okm = await waitFor(savedSignal, 3600000);
       if (okm !== 'ok') return stopReq ? 'أوقفت يدوياً' : who + ': انتهى وقت الانتظار';
     }
-    if (!manual) sv.click();
+    if (!manual) { SAVED[rowKey(D.i)] = 'maybe'; saveSaved(); sv.click(); }
     var ok = manual ? 'ok' : await waitFor(function () {
-      if (vis('.q-dialog .q-card').length) { confirmDialog(); return null; }
+      if (vis('.q-dialog .q-card').length) { return confirmDialog() === 'dup' ? 'dup' : null; }
       if (vis('.q-notification.bg-negative, .q-notification.text-negative').length) return 'bad';
       if (fieldErrors().length) return 'bad';
-      if (location.pathname !== before) return 'ok';
-      if (vis('.q-notification.bg-positive').length) return 'ok';
-      return null;
+      return savedSignal();
     }, 60000);
+    if (ok === 'dup') { delete SAVED[rowKey(D.i)]; saveSaved(); return 'DUP:' + who + ': المنصة تقول إن هذا الطالب موجود مسبقاً. لم أضغط تأكيد.'; }
+    if (ok === 'bad') { delete SAVED[rowKey(D.i)]; saveSaved(); }
+    if (!ok) return 'MAYBE:' + who;
     if (ok !== 'ok') {
       var n = vis('.q-notification').map(function (x) { return x.textContent.trim(); }).join(' | ');
       return who + ': لم يتم الحفظ' + (n ? ' ← ' + n : '') + (fieldErrors().length ? ' ← ' + fieldErrors().join('، ') : '');
     }
+    SAVED[rowKey(D.i)] = 'ok'; saveSaved();
     LOG.push((D.i + 1) + ' ✓ ' + [0, 1, 2, 4].map(function (k) { return r[k] || ''; }).join(' '));
     try { localStorage.setItem(KEY + '_log', JSON.stringify(LOG)); } catch (e) {}
     return null;
@@ -390,27 +406,34 @@
     if (!(to >= from && to <= D.rows.length)) { say('رقم «إلى الطالب» يجب أن يكون بين ' + from + ' و ' + D.rows.length, 'red'); return; }
     if (onAddPage()) sessionStorage.setItem('emisAddPath', location.pathname);
     D.i = from - 1; save();
-    var total = to - from + 1, done = 0;
+    var total = to - from + 1, done = 0, skipped = 0;
     busy = true; stopReq = false; setRunning(true);
     while (D.i < to && !stopReq) {
       progress(done, total);
+      var st = SAVED[rowKey(D.i)];
+      if (st === 'ok') { skipped++; D.i++; save(); continue; }
+      if (st === 'maybe') {
+        busy = false; setRunning(false); fromIn.value = D.i + 1; refresh();
+        showMaybe(D.i); return;
+      }
       say('⏳ جاري العمل على الطالب رقم ' + (D.i + 1) + ': ' + nameOf(D.i), '#1565c0');
       var err = await oneStudent();
+      if (err && err.indexOf('MAYBE:') === 0) { busy = false; setRunning(false); fromIn.value = D.i + 1; refresh(); showMaybe(D.i); return; }
       if (err) {
         busy = false; setRunning(false); fromIn.value = D.i + 1; refresh();
         if (err.indexOf('SESSION:') === 0) {
           say('⛔ توقفت عند الطالب رقم ' + (D.i + 1) + '\nالسبب: ' + err.slice(8).replace(/^الطالب \d+: /, '') + '.\nغالباً انتهت جلسة الدخول بعد التوقف عن العمل.\n\nالحل: اضغط F5 لتحديث الصفحة (وسجّل الدخول إن طُلب)، ثم افتح «إضافة طالب» واضغط زر «تعبئة EMIS» واضغط ابدأ. الرقم ' + (D.i + 1) + ' مكتوب لك جاهزاً.', 'red');
           return;
         }
-        say('⛔ توقفت عند الطالب رقم ' + (D.i + 1) + '\nالسبب: ' + err.replace(/^الطالب \d+: /, '') +
-          '\n\nالحل: صحّح الحقل في الصفحة واحفظ الطالب بيدك، ثم اكتب في «من الطالب» الرقم ' + (D.i + 2) + ' واضغط ابدأ.', 'red');
+        say('⛔ توقفت عند الطالب رقم ' + (D.i + 1) + '\nالسبب: ' + err.replace(/^DUP:/, '').replace(/^الطالب \d+: /, '') +
+          '\n\nالحل: اضغط ابدأ مرة أخرى بعد تصحيح البيانات في Excel (الطالب لم يُحفظ).\nإذا صحّحته وحفظته بيدك، اكتب في «من الطالب» الرقم ' + (D.i + 2) + '.', 'red');
         return;
       }
       done++; D.i++; save(); progress(done, total);
     }
     busy = false; setRunning(false);
     fromIn.value = Math.min(D.i + 1, D.rows.length); toIn.value = Math.min(D.i + total, D.rows.length); refresh();
-    say((stopReq ? '■ أوقفته. ' : '✅ انتهى! ') + 'تم إدخال ' + done + ' طالب.' + (D.i < D.rows.length ? '\nالدفعة التالية جاهزة: اضغط ابدأ.' : '\nتم إدخال جميع الطلاب 🎉'), 'green');
+    say((stopReq ? '■ أوقفته. ' : '✅ انتهى! ') + 'تم إدخال ' + done + ' طالب.' + (skipped ? ' (تخطيت ' + skipped + ' طالب محفوظ سابقاً)' : '') + (D.i < D.rows.length ? '\nالدفعة التالية جاهزة: اضغط ابدأ.' : '\nتم إدخال جميع الطلاب 🎉'), 'green');
   }
 
   // ================= واجهة اللوحة =================
@@ -460,6 +483,7 @@
     'إذا لم يجد خياراً في قائمة أو مكاناً في الشجرة، يطلب منك اختياره بيدك مرة واحدة ويتذكره لباقي الطلاب.<br>' +
     'إذا رفضت المنصة أي حقل يتوقف فوراً ويخبرك بالسبب، ولا يتخطى أي طالب.<br>' +
     '<a href="#" data-a="forget" style="color:#c62828">نسيان الاختيارات التي تعلّمها</a><br>' +
+    '<a href="#" data-a="clearsaved" style="color:#c62828">مسح سجل الطلاب المحفوظين (لا يحذف شيئاً من المنصة)</a><br>' +
     '<a href="#" data-a="wipe" style="color:#c62828">حذف الكود المحفوظ (للهاتف، عند التحديث)</a><br>لا تغلق الصفحة ولا تتنقل فيها أثناء العمل.</details>' +
     '</div>';
   document.body.appendChild(P);
@@ -481,6 +505,14 @@
     R('preview').innerHTML = D.rows.length && f >= 1 && f <= D.rows.length ?
       'يبدأ من: <b>' + nameOf(f - 1) + '</b>' + (t >= f && t <= D.rows.length ? '<br>وينتهي عند: <b>' + nameOf(t - 1) + '</b> (المجموع ' + (t - f + 1) + ' طالب)' : '') : '';
   }
+  function showMaybe(i) {
+    var m = R('msg'); m.style.color = '#b45309';
+    m.innerHTML = '⚠️ <b>الطالب رقم ' + (i + 1) + ': ' + nameOf(i) + '</b><br>ضغطت حفظ لكن لم أتأكد هل حُفظ أم لا، فتوقفت حتى لا يتكرر.<br>' +
+      '<b>افتح قائمة الطلاب في المنصة وابحث عنه</b>، ثم اختر:<br>' +
+      '<button class="b" data-a="m-ok" style="background:#2e7d32;margin:6px 2px">موجود ← تخطَّه</button>' +
+      '<button class="b" data-a="m-no" style="background:#c62828;margin:6px 2px">غير موجود ← أدخله</button>';
+    m.setAttribute('data-i', i);
+  }
   function setRunning(on) {
     var g = P.querySelector('[data-a=go]');
     g.textContent = on ? '■ أوقف' : '▶ ابدأ'; g.style.background = on ? '#424242' : '#c62828';
@@ -490,7 +522,13 @@
   P.addEventListener('click', function (e) {
     var a = e.target.closest('[data-a]'); if (!a) return; a = a.getAttribute('data-a');
     if (a === 'min') P.classList.toggle('min');
+    else if (a === 'm-ok' || a === 'm-no') {
+      var mi = +R('msg').getAttribute('data-i');
+      if (a === 'm-ok') { SAVED[rowKey(mi)] = 'ok'; fromIn.value = mi + 2; } else { delete SAVED[rowKey(mi)]; fromIn.value = mi + 1; }
+      saveSaved(); refresh(); say('تم. اضغط ▶ ابدأ للمتابعة.', 'green');
+    }
     else if (a === 'wipe') { e.preventDefault(); try { localStorage.removeItem('emisCode'); } catch (x) {} say('تم حذف الكود. في المرة القادمة سيطلب منك لصق الكود الجديد.', 'green'); }
+    else if (a === 'clearsaved') { e.preventDefault(); if (confirm('مسح السجل يعني أن المساعد قد يعيد إدخال طلاب محفوظين. متأكد؟')) { SAVED = {}; saveSaved(); say('تم مسح السجل.', 'green'); } }
     else if (a === 'forget') { e.preventDefault(); LEARN = {}; saveLearn(); say('تم مسح الاختيارات المحفوظة.', 'green'); }
     else if (a === 'close') { stopReq = true; P.style.display = 'none'; }
     else if (a === 'paste') { R('pastebox').style.display = 'block'; ta.focus(); }
