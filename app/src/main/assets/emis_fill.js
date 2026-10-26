@@ -1,5 +1,5 @@
 (function () {
-  var VER = 13;
+  var VER = 14;
   if (window.__emisPanel && window.__emisVer === VER && document.body.contains(window.__emisPanel)) { window.__emisPanel.style.display = 'block'; return; }
   if (window.__emisPanel) { if (window.__emisStop) window.__emisStop(); window.__emisPanel.remove(); }
   if (window.__emisKeys) document.removeEventListener('keydown', window.__emisKeys, true);
@@ -271,7 +271,10 @@
       var h = D.h[c], v = (r[c] || '').trim();
       if (!h || !v) continue;
       var el = findField(h);
-      if (!el && /رقم|جهة|الشعبة|السجل|الصح/.test(h)) el = await waitFor(function () { return findField(h); }, 15000);
+      if (!el) {
+        var trig = /الشعبة/.test(h) ? 'الصف الدراسي' : (/رقم البطاقة|جهة|السجل|الصح/.test(h) ? 'نوع الهوية' : null);
+        if (trig && findField(trig)) el = await waitFor(function () { return findField(h); }, 15000);
+      }
       if (!el) continue;
       try {
         if (el.getAttribute('role') === 'checkbox') {

@@ -42,6 +42,10 @@ public class MainActivity extends Activity {
         s.setDisplayZoomControls(false);
         s.setSupportMultipleWindows(false);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        // نفس هوية متصفح Chrome العادي (بدون علامة WebView) حتى يقبل التحقق الأمني
+        String ua = s.getUserAgentString().replace("; wv)", ")").replaceAll("Version/\\d+(\\.\\d+)* ", "");
+        s.setUserAgentString(ua);
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -52,7 +56,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
-                if (url != null && url.startsWith("https://emis.moedu.gov.iq")) {
+                if (url != null && url.startsWith("https://emis.moedu.gov.iq") && !url.contains("/auth/")) {
                     String boot = "(function(){window.__emisSrc=" + JSONObject.quote(helperJs) + ";" +
                         "if(window.__emisWatch)return;window.__emisWatch=setInterval(function(){" +
                         "if(/\\/students\\//.test(location.pathname)&&!document.getElementById('emisP')){" +
