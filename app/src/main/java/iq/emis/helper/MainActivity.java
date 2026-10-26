@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
-                if (url != null && url.startsWith("https://emis.moedu.gov.iq") && !url.contains("/auth/")) {
+                if (url != null && url.startsWith("https://emis.moedu.gov.iq")) {
                     String boot = "(function(){window.__emisSrc=" + JSONObject.quote(helperJs) + ";" +
                         "if(window.__emisWatch)return;window.__emisWatch=setInterval(function(){" +
                         "if(/\\/students\\//.test(location.pathname)&&!document.getElementById('emisP')){" +
