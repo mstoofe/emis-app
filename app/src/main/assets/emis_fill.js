@@ -1,5 +1,5 @@
 (function () {
-  var VER = 15;
+  var VER = 16;
   if (window.__emisPanel && window.__emisVer === VER && document.body.contains(window.__emisPanel)) { window.__emisPanel.style.display = 'block'; return; }
   if (window.__emisPanel) { if (window.__emisStop) window.__emisStop(); window.__emisPanel.remove(); }
   if (window.__emisKeys) document.removeEventListener('keydown', window.__emisKeys, true);
@@ -466,7 +466,7 @@
     '<div class="hd"><span>مساعد إدخال الطلاب — EMIS <small style="opacity:.7">(إصدار ' + VER + ')</small></span><span><button data-a="min" title="تصغير">—</button><button data-a="close" title="إغلاق">✕</button></span></div>' +
     '<div class="bd">' +
     '<div class="st"><h4><span class="num">1</span>بيانات الطلاب</h4>' +
-    '<div class="row"><span data-r="loaded" style="flex:1"></span><button class="b" data-a="paste" style="background:#6a1b9a">📋 لصق من Excel</button></div>' +
+    '<div class="row"><span data-r="loaded" style="flex:1"></span></div><div class="row" style="margin-top:6px"><button class="b" data-a="file" style="background:#2e7d32">📂 اختيار ملف Excel</button><button class="b" data-a="paste" style="background:#6a1b9a">📋 لصق</button><input type="file" data-r="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="display:none"></div>' +
     '<div data-r="pastebox" style="display:none"><div class="hint">في Excel: حدّد صف العناوين مع صفوف الطلاب ← Ctrl+C ← ثم الصق هنا بـ Ctrl+V</div>' +
     '<textarea data-r="ta"></textarea><div class="row"><button class="b" data-a="savedata" style="background:#2e7d32">✓ حفظ البيانات</button><button class="b" data-a="cancel" style="background:#9e9e9e">إلغاء</button></div></div></div>' +
     '<div class="st"><h4><span class="num">2</span>أي الطلاب تريد إدخالهم؟</h4>' +
@@ -494,6 +494,75 @@
   P.querySelector('input[value=' + mode + ']').checked = true;
   P.querySelectorAll('input[name=emisMode]').forEach(function (r) { r.onchange = function () { try { localStorage.setItem(KEY + '_auto', autoSave.checked ? '1' : '0'); } catch (e) {} }; });
 
+  // ---- قراءة ملف Excel بدون مكتبات خارجية ----
+  async function unzip(buf) {
+    var dv = new DataView(buf), u8 = new Uint8Array(buf), files = {}, e = -1;
+    for (var i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) throw new Error('ليس ملف Excel صالحاً');
+    var n = dv.getUint16(e + 10, true), p = dv.getUint32(e + 16, true);
+    for (var k = 0; k < n; k++) {
+      var method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lo = dv.getUint32(p + 42, true);
+      var name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl));
+      files[name] = { method: method, csize: csize, lo: lo };
+      p += 46 + nl + xl + cl;
+    }
+    return async function (name) {
+      var f = files[name]; if (!f) return null;
+      var s = f.lo + 30 + dv.getUint16(f.lo + 26, true) + dv.getUint16(f.lo + 28, true);
+      var data = u8.slice(s, s + f.csize);
+      if (f.method === 8) data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+      return new TextDecoder('utf-8').decode(data);
+    };
+  }
+  function xml(t) { return new DOMParser().parseFromString(t, 'application/xml'); }
+  function colIdx(ref) { var m = /^[A-Z]+/.exec(ref)[0], n = 0; for (var i = 0; i < m.length; i++) n = n * 26 + m.charCodeAt(i) - 64; return n - 1; }
+  async function readXlsx(file) {
+    var get = await unzip(await file.arrayBuffer());
+    var ss = [], sst = await get('xl/sharedStrings.xml');
+    if (sst) Array.prototype.forEach.call(xml(sst).getElementsByTagName('si'), function (si) {
+      ss.push(Array.prototype.map.call(si.getElementsByTagName('t'), function (t) { return t.textContent; }).join(''));
+    });
+    var wb = xml(await get('xl/workbook.xml')), rels = xml(await get('xl/_rels/workbook.xml.rels') || '<r/>');
+    var sheets = Array.prototype.map.call(wb.getElementsByTagName('sheet'), function (s) {
+      var rid = s.getAttribute('r:id') || s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'), tgt = null;
+      Array.prototype.forEach.call(rels.getElementsByTagName('Relationship'), function (r) { if (r.getAttribute('Id') === rid) tgt = r.getAttribute('Target'); });
+      if (tgt) tgt = tgt.charAt(0) === '/' ? tgt.slice(1) : 'xl/' + tgt.replace(/^\.\//, '');
+      return { name: s.getAttribute('name'), path: tgt };
+    });
+    var pick = sheets.filter(function (s) { return norm(s.name) === norm('الطلاب'); })[0] || sheets[0];
+    var doc = xml(await get(pick.path)), rows = [];
+    Array.prototype.forEach.call(doc.getElementsByTagName('row'), function (r) {
+      var row = [];
+      Array.prototype.forEach.call(r.getElementsByTagName('c'), function (c) {
+        var t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0], val = '';
+        if (t === 's' && v) val = ss[+v.textContent] || '';
+        else if (t === 'inlineStr') val = Array.prototype.map.call(c.getElementsByTagName('t'), function (x) { return x.textContent; }).join('');
+        else if (v) val = v.textContent;
+        if (/^-?\d+\.0+$/.test(val)) val = val.replace(/\.0+$/, '');
+        var ci = c.getAttribute('r') ? colIdx(c.getAttribute('r')) : row.length;
+        while (row.length < ci) row.push('');
+        row[ci] = String(val).trim();
+      });
+      rows.push(row);
+    });
+    return { sheet: pick.name, rows: rows };
+  }
+  function loadTable(rows, src) {
+    rows = rows.filter(function (r) { return r.some(function (x) { return x && String(x).trim(); }); });
+    var hi = -1;
+    for (var i = 0; i < Math.min(rows.length, 10); i++) if (rows[i].some(function (x) { return norm(x) === norm('الإسم'); })) { hi = i; break; }
+    if (hi < 0) { say('لم أجد صف العناوين (الإسم، إسم الأب...) في ' + src + '.', 'red'); return; }
+    var hd = rows[hi].map(function (x) { return String(x || '').trim(); });
+    var ph = hd.map(function (h) { return /هاتف/.test(h); });
+    var body = rows.slice(hi + 1).map(function (r) {
+      return hd.map(function (h, c) { var v = String(r[c] || '').trim(); if (ph[c] && /^7\d{9}$/.test(v)) v = '0' + v; return v; });
+    }).filter(function (r) { return r.some(Boolean); });
+    if (!body.length) { say('الملف لا يحتوي طلاباً تحت صف العناوين.', 'red'); return; }
+    D = { h: hd, rows: body, i: 0 };
+    save(); ta.value = ''; R('pastebox').style.display = 'none';
+    fromIn.value = 1; toIn.value = D.rows.length; refresh();
+    say('✅ تم تحميل ' + D.rows.length + ' طالب من ' + src + '. البيانات تبقى محفوظة في متصفحك.', 'green');
+  }
   function nameOf(i) { var r = D.rows[i] || []; return [0, 1, 2, 4].map(function (k) { return (r[k] || '').trim(); }).join(' ').trim(); }
   function say(t, col) { var m = R('msg'); m.textContent = t; m.style.color = col || '#1a1a1a'; }
   function progress(done, total) { R('bar').style.width = (total ? done * 100 / total : 0) + '%'; R('prog').textContent = total ? 'تم ' + done + ' من ' + total : ''; }
@@ -519,6 +588,20 @@
     fromIn.disabled = toIn.disabled = on;
   }
   fromIn.oninput = toIn.oninput = refresh;
+  R('file').onchange = async function () {
+    var f = this.files && this.files[0]; if (!f) return;
+    say('⏳ جاري قراءة الملف ' + f.name + ' ...', '#1565c0');
+    try {
+      if (/\.csv$/i.test(f.name)) {
+        var txt = (await f.text()).replace(/^\ufeff/, '').replace(/\r/g, '');
+        var sep = txt.split('\n')[0].indexOf('\t') >= 0 ? '\t' : (txt.split('\n')[0].indexOf(';') >= 0 ? ';' : ',');
+        loadTable(txt.split('\n').map(function (l) { return l.split(sep).map(function (x) { return x.replace(/^"|"$/g, ''); }); }), 'الملف ' + f.name);
+      } else {
+        var res = await readXlsx(f);
+        loadTable(res.rows, 'ورقة «' + res.sheet + '»');
+      }
+    } catch (err) { say('تعذرت قراءة الملف: ' + (err.message || err) + '\nتأكد أنه ملف Excel بصيغة ‎.xlsx', 'red'); }
+  };
   P.addEventListener('click', function (e) {
     var a = e.target.closest('[data-a]'); if (!a) return; a = a.getAttribute('data-a');
     if (a === 'min') P.classList.toggle('min');
@@ -534,14 +617,12 @@
     else if (a === 'paste') { R('pastebox').style.display = 'block'; ta.focus(); }
     else if (a === 'cancel') { ta.value = ''; R('pastebox').style.display = 'none'; }
     else if (a === 'savedata') {
-      var lines = ta.value.replace(/\r/g, '').split('\n').filter(function (l) { return l.replace(/\t/g, '').trim(); });
-      if (lines.length < 2) { say('الصق صف العناوين وطالباً واحداً على الأقل.', 'red'); return; }
-      var hd = lines[0].split('\t').map(function (x) { return x.trim(); });
-      if (!hd.some(function (x) { return norm(x) === norm('الإسم'); })) { say('لم أجد صف العناوين. تأكد أنك نسخت الصف الأول (الإسم، إسم الأب...) مع الطلاب.', 'red'); return; }
-      D = { h: hd, rows: lines.slice(1).map(function (l) { return l.split('\t'); }), i: 0 };
-      save(); ta.value = ''; R('pastebox').style.display = 'none';
-      fromIn.value = 1; toIn.value = D.rows.length; refresh(); say('✅ تم حفظ ' + D.rows.length + ' طالب. البيانات تبقى محفوظة في متصفحك.', 'green');
+      var lines = ta.value.replace(/\r/g, '').split('\n');
+      if (lines.filter(function (l) { return l.replace(/\t/g, '').trim(); }).length < 2) { say('الصق صف العناوين وطالباً واحداً على الأقل.', 'red'); return; }
+      loadTable(lines.map(function (l) { return l.split('\t'); }), 'اللصق');
     }
+    else if (a === 'file') { R('file').value = ''; R('file').click(); }
+
     else if (a === 'go') { if (busy) { stopReq = true; say('سيتوقف بعد الخطوة الحالية...', '#b45309'); } else runAuto(); }
   });
   // سحب اللوحة

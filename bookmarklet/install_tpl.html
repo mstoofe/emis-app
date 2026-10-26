@@ -1,0 +1,19 @@
+<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>زر تعبئة EMIS</title>
+<style>body{font-family:Tahoma,Arial,sans-serif;max-width:720px;margin:30px auto;padding:0 16px;line-height:1.9;color:#1a1a1a;background:#f6f8fb}
+h1{color:#1565c0;font-size:24px}.box{background:#fff;border:1px solid #dde3ea;border-radius:12px;padding:16px 20px;margin:16px 0}
+a.bm{display:inline-block;background:#2e7d32;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:bold;font-size:18px;cursor:grab}
+kbd{background:#eee;border:1px solid #ccc;border-radius:4px;padding:1px 6px;font-family:inherit}button{padding:8px 14px;border:0;border-radius:8px;background:#1565c0;color:#fff;cursor:pointer}
+ol li{margin:4px 0}</style></head><body>
+<h1>زر تعبئة EMIS</h1>
+<div class="box"><b>1. ثبّت الزر:</b> أظهر شريط الإشارات المرجعية بـ <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>، ثم اسحب الزر الأخضر وأفلته على الشريط.<br><br>
+<a class="bm" href="__HREF__" onclick="alert('لا تضغطه هنا — اسحبه إلى شريط الإشارات المرجعية');return false;">تعبئة EMIS</a>
+<p style="font-size:13px;color:#555">إذا لم ينجح السحب: اضغط «نسخ الكود»، ثم أضف إشارة مرجعية جديدة لأي صفحة، وعدّلها: الاسم «تعبئة EMIS» والعنوان (URL) الصق الكود.</p>
+<button onclick="navigator.clipboard.writeText(CODE).then(()=>this.textContent='تم النسخ ✓')">نسخ الكود</button></div>
+<div class="box"><b>2. الاستخدام:</b><ol>
+<li>افتح EMIS ← إدارة الطلاب ← <b>إضافة طالب</b>، ثم اضغط «تعبئة EMIS» من الشريط. تظهر لوحة فيها 3 خطوات مرقّمة.</li>
+<li><b>الخطوة 1:</b> اضغط «📂 اختيار ملف Excel» واختر ملف الطلاب (‎.xlsx) — أو «لصق» إن أردت النسخ واللصق. مرة واحدة فقط.</li>
+<li><b>الخطوة 2:</b> اكتب من الطالب رقم كذا إلى رقم كذا (مثلاً 1 إلى 40). تظهر أسماء أول وآخر طالب للتأكد.</li>
+<li><b>الخطوة 3:</b> اختر من يضغط الحفظ: أنت (للتجربة) أو هو وحده (للدفعات الكبيرة).</li>
+<li>اضغط <b>▶ ابدأ</b> واترك الصفحة تعمل. شريط التقدم يعرض كم طالب تم.</li></ol>
+عند انتهاء الدفعة تُجهَّز الأرقام للدفعة التالية تلقائياً، فتضغط «ابدأ» فقط.</div>
+<script>var CODE=__CODE__;</script></body></html>
